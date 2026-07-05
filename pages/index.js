@@ -75,10 +75,11 @@ async function callModel(prompt) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: [{ role: "user", content: prompt }] }),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
       const block = (data.content || []).find((b) => b.type === "text");
-      return block ? block.text.trim() : "";
+      if (!block) throw new Error("Model response had no text content");
+      return block.text.trim();
     } catch (e) { lastErr = e; await sleep(700); }
   }
   throw lastErr;
@@ -184,9 +185,12 @@ export default function MiterExercise() {
       <div className="flex flex-col gap-1.5 mb-6">
         {log.length === 0 && <p className="text-sm text-slate-400">Processing tickets…</p>}
         {log.map((e) => (
-          <div key={e.logId} className="flex items-center justify-between gap-3 text-sm bg-white border border-slate-100 rounded-lg px-3 py-2">
-            <span className="text-slate-700 truncate">#{e.ticketId} · {e.title}</span>
-            <span className={`text-xs px-2 py-0.5 rounded-md whitespace-nowrap ${stStyle[e.status] || ""}`}>{stLabel[e.status] || e.status}{e.matchId && (e.status === "merged" || e.status === "skipped") ? ` (${e.matchId})` : ""}</span>
+          <div key={e.logId} className="flex flex-col gap-0.5 text-sm bg-white border border-slate-100 rounded-lg px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-slate-700 truncate">#{e.ticketId} · {e.title}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-md whitespace-nowrap ${stStyle[e.status] || ""}`}>{stLabel[e.status] || e.status}{e.matchId && (e.status === "merged" || e.status === "skipped") ? ` (${e.matchId})` : ""}</span>
+            </div>
+            {e.status === "error" && e.reason && <span className="text-xs text-red-600">{e.reason}</span>}
           </div>
         ))}
       </div>
