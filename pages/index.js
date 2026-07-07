@@ -22,6 +22,15 @@ const SEED_TICKETS = [
   { id: 136085, category: "Ecosystem / Sage & Integrations", title: "Sub jobs not inheriting parent project properties in Sage Intacct sync", body: "After enabling sub jobs, newly synced sub jobs aren't inheriting the parent project's properties as expected.", resolution: "Sub-job property inheritance only applies to jobs created after the parent-child link is established in sync settings; jobs synced before don't retroactively inherit. Agent re-triggered a sync after confirming the parent link, which inherited properties going forward." },
 ];
 
+const SEED_ENG_ISSUES = [
+  { id: "ENG-482", team: "Platform Engineering", title: "Job Cost report times out for large multi-job accounts", body: "The Job Cost report endpoint was returning 504s for accounts with 500+ active jobs, blocking report generation entirely.", resolution: "The report query was doing an N+1 lookup per job for labor allocations. Fixed by batching the labor allocation query and adding a covering index on (job_id, pay_period). Added a query timeout with a pagination fallback for very large accounts." },
+  { id: "ENG-507", team: "Integrations Engineering", title: "Sage Intacct sync silently drops sub-job updates", body: "Sub-job property updates weren't propagating to Sage Intacct after the initial sync, with no error surfaced anywhere.", resolution: "The sync worker was catching and swallowing a 422 from Intacct's API when a sub-job's parent link was stale, then marking the sync as successful. Fixed by surfacing sync failures on the customer-facing sync status page and retrying with the refreshed parent link." },
+  { id: "ENG-455", team: "Payroll Engineering", title: "Fringe offset override doesn't survive payroll re-run", body: "When a payroll was recalculated after a correction, job-level fringe offset overrides reset to the deduction-code default, undoing manual overrides.", resolution: "Payroll re-run was reloading deduction rules from the code-level config instead of the job-level override table. Fixed recalculation to read job-level overrides first, falling back to the code-level default only when no override exists." },
+  { id: "ENG-491", team: "Platform Engineering", title: "EEO report generation broke after annual compliance update", body: "After the scheduled annual EEO compliance-spec update shipped, report generation started throwing a schema validation error for a subset of customers.", resolution: "The new spec added a required field that wasn't backfilled for accounts created before a certain date. Fixed by defaulting the field server-side for legacy accounts and backfilling it via migration." },
+  { id: "ENG-512", team: "Infra", title: "Duplicate reimbursement charges under concurrent submission", body: "Customers double-clicking submit on the reimbursement form occasionally created two identical charge records.", resolution: "Submission lacked an idempotency key, so concurrent requests both inserted rows. Fixed by adding a client-generated idempotency key with a unique constraint at the database level." },
+  { id: "ENG-540", team: "Platform Engineering", title: "Job Cost report still slow for 1000+ job accounts after batching fix", body: "Accounts with more than 1000 active jobs still see 15s+ load times on the Job Cost report even after the N+1 fix shipped.", resolution: "Batching fixed the N+1 pattern, but the report still loaded the full job list client-side. Added server-side pagination with a job search/filter so large accounts don't have to load everything at once." },
+];
+
 function buildPrompt(ticket, library) {
   const existing = library.length === 0 ? "none yet" : library.map((s) => `id=${s.id} | Title: ${s.title} | Problem: ${s.problem} | Cause: ${s.cause}`).join("\n");
   return `You maintain a library of reusable support SOPs for Miter (construction SaaS). A resolved support ticket arrived. Decide one of:
@@ -47,6 +56,33 @@ Cause: one line
 Steps: step | step | step
 
 For SKIP, repeat the matched SOP's existing content. For MERGE, output the full updated SOP.`;
+}
+
+function buildRunbookPrompt(issue, library) {
+  const existing = library.length === 0 ? "none yet" : library.map((r) => `id=${r.id} | Title: ${r.title} | Problem: ${r.problem} | Cause: ${r.cause}`).join("\n");
+  return `You maintain an internal engineering runbook of resolved technical issues for Miter (construction SaaS). A resolved Linear issue arrived. Decide one of:
+- NEW: no existing runbook entry covers this issue -> write a new entry.
+- SKIP: an existing entry already fully covers it, nothing new to add.
+- MERGE: same underlying issue as an existing entry, but this issue adds a useful new cause/edge case/step -> output the updated entry.
+
+New issue:
+Team: ${issue.team}
+Issue description: ${issue.body}
+Engineering resolution: ${issue.resolution}
+
+Existing runbook entries:
+${existing}
+
+Reply in EXACTLY this format, each field on ONE line, nothing else:
+Decision: NEW or SKIP or MERGE
+MatchId: existing entry id or NONE
+Reason: one short sentence
+Title: runbook entry title
+Problem: one line
+Cause: one line
+Steps: step | step | step
+
+For SKIP, repeat the matched entry's existing content. For MERGE, output the full updated entry.`;
 }
 
 function parse(text) {
@@ -92,6 +128,13 @@ function sopToText(s) {
 let counter = 1;
 const newId = () => "SOP-" + String(counter++).padStart(3, "0");
 
+function runbookEntryToText(r) {
+  return [r.title, "", `Team: ${r.team}`, `Source issues: ${r.sourceIssues.join(", ")}`, `Last updated: ${r.updated}`, "", "Problem", r.problem, "", "Cause", r.cause, "", "Resolution steps", ...r.steps.map((x, i) => `${i + 1}. ${x}`)].join("\n");
+}
+
+let runbookCounter = 1;
+const newRunbookId = () => "RUN-" + String(runbookCounter++).padStart(3, "0");
+
 export default function MiterExercise() {
   const [library, setLibrary] = useState([]);
   const [log, setLog] = useState([]);
@@ -103,6 +146,13 @@ export default function MiterExercise() {
   const started = useRef(false);
   const logSeq = useRef(0);
   const today = new Date().toISOString().slice(0, 10);
+
+  const [runbook, setRunbook] = useState([]);
+  const [runbookLog, setRunbookLog] = useState([]);
+  const [runbookCopiedId, setRunbookCopiedId] = useState(null);
+  const runbookRef = useRef([]);
+  const runbookStarted = useRef(false);
+  const runbookLogSeq = useRef(0);
 
   const addLog = (e) => { const logId = ++logSeq.current; setLog((p) => [{ ...e, logId }, ...p]); return logId; };
   const setLogRow = (logId, patch) => setLog((p) => p.map((e) => (e.logId === logId ? { ...e, ...patch } : e)));
@@ -139,6 +189,50 @@ export default function MiterExercise() {
     started.current = true;
     (async () => { setBusy(true); for (const t of SEED_TICKETS) { await processTicket(t); await sleep(400); } setBusy(false); })();
   }, []);
+
+  const addRunbookLog = (e) => { const logId = ++runbookLogSeq.current; setRunbookLog((p) => [{ ...e, logId }, ...p]); return logId; };
+  const setRunbookLogRow = (logId, patch) => setRunbookLog((p) => p.map((e) => (e.logId === logId ? { ...e, ...patch } : e)));
+
+  async function processIssue(issue) {
+    const logId = addRunbookLog({ ticketId: issue.id, title: issue.title, status: "processing" });
+    try {
+      const raw = await callModel(buildRunbookPrompt(issue, runbookRef.current));
+      const d = parse(raw);
+      if (d.decision === "SKIP" && runbookRef.current.some((r) => r.id === d.matchId)) {
+        setRunbookLogRow(logId, { status: "skipped", reason: d.reason, matchId: d.matchId }); return;
+      }
+      if (d.decision === "MERGE") {
+        const idx = runbookRef.current.findIndex((r) => r.id === d.matchId);
+        if (idx >= 0) {
+          const ex = runbookRef.current[idx];
+          const upd = { ...ex, title: d.title || ex.title, problem: d.problem || ex.problem, cause: d.cause || ex.cause, steps: d.steps.length ? d.steps : ex.steps, sourceIssues: [...ex.sourceIssues, issue.id], updated: today, mergedCount: (ex.mergedCount || 1) + 1 };
+          const next = [...runbookRef.current]; next[idx] = upd;
+          runbookRef.current = next; setRunbook(next);
+          setRunbookLogRow(logId, { status: "merged", reason: d.reason, matchId: ex.id }); return;
+        }
+      }
+      const entry = { id: newRunbookId(), title: d.title || issue.title, problem: d.problem, cause: d.cause, steps: d.steps, team: issue.team, sourceIssues: [issue.id], updated: today, mergedCount: 1, published: false };
+      const next = [...runbookRef.current, entry];
+      runbookRef.current = next; setRunbook(next);
+      setRunbookLogRow(logId, { status: "created", reason: d.reason, matchId: entry.id });
+    } catch (e) {
+      setRunbookLogRow(logId, { status: "error", reason: (e && e.message) || "error" });
+    }
+  }
+
+  useEffect(() => {
+    if (runbookStarted.current) return;
+    runbookStarted.current = true;
+    (async () => { for (const iss of SEED_ENG_ISSUES) { await processIssue(iss); await sleep(400); } })();
+  }, []);
+
+  function publishRunbook(id) {
+    const next = runbookRef.current.map((r) => (r.id === id ? { ...r, published: true } : r));
+    runbookRef.current = next; setRunbook(next);
+  }
+  function copyRunbook(id, text) {
+    navigator.clipboard.writeText(text).then(() => { setRunbookCopiedId(id); setTimeout(() => setRunbookCopiedId((c) => (c === id ? null : c)), 2000); });
+  }
 
   async function addTicket() {
     if (!form.title.trim() || !form.body.trim() || !form.resolution.trim()) return;
@@ -222,6 +316,55 @@ export default function MiterExercise() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="border-t border-slate-200 mt-8 pt-6">
+        <h1 className="text-xl font-medium mb-1">Engineering Runbook</h1>
+        <p className="text-sm text-slate-500 mb-4">A resolved Linear issue is read by the LLM, checked against the existing runbook, then it creates a new entry, merges new detail into an existing one, or skips it as a duplicate.</p>
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-5 text-sm text-slate-600">Issues synced from Linear (simulated). New runbook entries publish to a shared Notion wiki in production.</div>
+
+        <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">Engineering activity</p>
+        <div className="flex flex-col gap-1.5 mb-6">
+          {runbookLog.length === 0 && <p className="text-sm text-slate-400">Processing issues…</p>}
+          {runbookLog.map((e) => (
+            <div key={e.logId} className="flex flex-col gap-0.5 text-sm bg-white border border-slate-100 rounded-lg px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-700 truncate">{e.ticketId} · {e.title}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-md whitespace-nowrap ${stStyle[e.status] || ""}`}>{stLabel[e.status] || e.status}{e.matchId && (e.status === "merged" || e.status === "skipped") ? ` (${e.matchId})` : ""}</span>
+              </div>
+              {e.status === "error" && e.reason && <span className="text-xs text-red-600">{e.reason}</span>}
+            </div>
+          ))}
+        </div>
+
+        <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">Runbook entries ({runbook.length})</p>
+        <div className="flex flex-col gap-3">
+          {runbook.map((r) => (
+            <div key={r.id} className="bg-white border border-slate-200 rounded-xl p-4">
+              <div className="flex justify-between items-start gap-3 mb-2">
+                <h2 className="text-base font-medium">{r.title}</h2>
+                {r.mergedCount > 1 && <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md whitespace-nowrap">Merged · {r.mergedCount} issues</span>}
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500 mb-3 bg-slate-50 rounded-md p-2.5">
+                <div><span className="text-slate-400">Runbook ID: </span>{r.id}</div>
+                <div><span className="text-slate-400">Team: </span>{r.team}</div>
+                <div><span className="text-slate-400">Source issues: </span>{r.sourceIssues.join(", ")}</div>
+                <div><span className="text-slate-400">Last updated: </span>{r.updated}</div>
+              </div>
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Problem</p>
+              <p className="text-[13px] text-slate-700 mb-3 leading-relaxed">{r.problem}</p>
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Cause</p>
+              <p className="text-[13px] text-slate-700 mb-3 leading-relaxed">{r.cause}</p>
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Resolution steps</p>
+              <ol className="list-decimal list-inside text-[13px] text-slate-700 mb-3 leading-relaxed space-y-0.5">{r.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
+              <div className="flex items-center gap-2">
+                {r.published ? <span className="text-xs text-green-700 bg-green-50 px-2 py-1 rounded-md">Published to Notion</span> : <button onClick={() => publishRunbook(r.id)} className="text-sm font-medium bg-slate-800 text-white rounded-md px-3 py-1 hover:bg-slate-700">Publish to Notion</button>}
+                <button onClick={() => copyRunbook(r.id, runbookEntryToText(r))} className="text-sm font-medium border border-slate-300 rounded-md px-3 py-1 hover:bg-slate-50">Copy</button>
+                {runbookCopiedId === r.id && <span className="text-xs text-green-600 ml-1">Copied</span>}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
