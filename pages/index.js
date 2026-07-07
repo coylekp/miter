@@ -153,8 +153,9 @@ export default function MiterExercise() {
 
   const [runbook, setRunbook] = useState([]);
   const [runbookCopiedId, setRunbookCopiedId] = useState(null);
-  const [activeTab, setActiveTab] = useState("sop");
+  const [expandedLinks, setExpandedLinks] = useState({});
   const runbookRef = useRef([]);
+  const toggleLink = (id) => setExpandedLinks((p) => ({ ...p, [id]: !p[id] }));
 
   const addLog = (e) => { const logId = ++logSeq.current; setLog((p) => [{ ...e, logId }, ...p]); return logId; };
   const setLogRow = (logId, patch) => setLog((p) => p.map((e) => (e.logId === logId ? { ...e, ...patch } : e)));
@@ -181,8 +182,20 @@ export default function MiterExercise() {
     return { status: "created", reason: d.reason, matchId: entry.id };
   }
 
+  function attachRunbookLink(sopId, runbookId) {
+    const idx = libRef.current.findIndex((s) => s.id === sopId);
+    if (idx < 0) return;
+    const ex = libRef.current[idx];
+    const ids = new Set(ex.linkedRunbookIds || []);
+    ids.add(runbookId);
+    const upd = { ...ex, linkedRunbookIds: [...ids] };
+    const next = [...libRef.current]; next[idx] = upd;
+    libRef.current = next; setLibrary(next);
+  }
+
   async function processTicket(ticket, linkedIssue) {
     const logId = addLog({ ticketId: ticket.id, title: ticket.title, status: "processing", engIssue: linkedIssue ? { id: linkedIssue.id, status: "processing" } : null });
+    let sopId = null;
     try {
       const raw = await callModel(buildPrompt(ticket, libRef.current));
       const d = parse(raw);
@@ -195,11 +208,13 @@ export default function MiterExercise() {
         const next = [...libRef.current]; next[idx] = upd;
         libRef.current = next; setLibrary(next);
         setLogRow(logId, { status: "merged", reason: d.reason, matchId: ex.id });
+        sopId = ex.id;
       } else {
-        const sop = { id: newId(), title: d.title || ticket.title, problem: d.problem, cause: d.cause, steps: d.steps, owner: ownerFor(ticket.category), category: ticket.category, sourceTickets: [ticket.id], updated: today, mergedCount: 1, published: false };
+        const sop = { id: newId(), title: d.title || ticket.title, problem: d.problem, cause: d.cause, steps: d.steps, owner: ownerFor(ticket.category), category: ticket.category, sourceTickets: [ticket.id], updated: today, mergedCount: 1, published: false, linkedRunbookIds: [] };
         const next = [...libRef.current, sop];
         libRef.current = next; setLibrary(next);
         setLogRow(logId, { status: "created", reason: d.reason, matchId: sop.id });
+        sopId = sop.id;
       }
     } catch (e) {
       setLogRow(logId, { status: "error", reason: (e && e.message) || "error" });
@@ -209,6 +224,7 @@ export default function MiterExercise() {
       try {
         const result = await processIssue(linkedIssue);
         setLogRow(logId, { engIssue: { id: linkedIssue.id, ...result } });
+        if (sopId && result.matchId) attachRunbookLink(sopId, result.matchId);
       } catch (e) {
         setLogRow(logId, { engIssue: { id: linkedIssue.id, status: "error", reason: (e && e.message) || "error" } });
       }
@@ -256,14 +272,48 @@ export default function MiterExercise() {
   const stLabel = { processing: "Processing…", created: "Created new SOP", merged: "Merged into existing", skipped: "Skipped — duplicate", error: "Error" };
   const engStLabel = { processing: "Processing…", created: "Created runbook entry", merged: "Merged into existing", skipped: "Skipped — duplicate", error: "Error" };
 
+  function renderRunbookDetail(r) {
+    return (
+      <div key={r.id} className="bg-slate-900 text-slate-100 border border-slate-900 border-l-4 border-l-violet-500 rounded-xl p-4 mb-3">
+        <div className="flex justify-between items-start gap-3 mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-semibold tracking-wide text-violet-300 bg-violet-950 px-1.5 py-0.5 rounded">RUNBOOK</span>
+            <h3 className="text-base font-medium font-mono">{r.title}</h3>
+          </div>
+          {r.mergedCount > 1 && <span className="text-xs text-amber-300 bg-amber-950 px-2 py-0.5 rounded-md whitespace-nowrap">Merged · {r.mergedCount} issues</span>}
+        </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 mb-3 bg-slate-800 rounded-md p-2.5 font-mono">
+          <div><span className="text-slate-500">Runbook ID: </span>{r.id}</div>
+          <div><span className="text-slate-500">Team: </span>{r.team}</div>
+          <div><span className="text-slate-500">Source issues: </span>{r.sourceIssues.join(", ")}</div>
+          <div><span className="text-slate-500">Source tickets: </span>{[...new Set(r.sourceIssues.map((i) => TICKET_BY_ENG_ISSUE[i]).filter(Boolean))].map((t) => "#" + t).join(", ") || "—"}</div>
+        </div>
+        <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Symptom</p>
+        <p className="text-[13px] text-slate-200 mb-3 leading-relaxed">{r.problem}</p>
+        <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Root cause</p>
+        <p className="text-[13px] text-slate-200 mb-3 leading-relaxed">{r.cause}</p>
+        <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Fix</p>
+        <ol className="list-decimal list-inside text-[13px] text-slate-200 mb-3 leading-relaxed space-y-0.5">{r.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
+        <div className="flex items-center gap-2">
+          {r.published ? <span className="text-xs text-green-300 bg-green-950 px-2 py-1 rounded-md">Published to Notion</span> : <button onClick={() => publishRunbook(r.id)} className="text-sm font-medium bg-violet-600 text-white rounded-md px-3 py-1 hover:bg-violet-500">Publish to Notion</button>}
+          <button onClick={() => copyRunbook(r.id, runbookEntryToText(r))} className="text-sm font-medium border border-slate-700 text-slate-200 rounded-md px-3 py-1 hover:bg-slate-800">Copy</button>
+          {runbookCopiedId === r.id && <span className="text-xs text-green-400 ml-1">Copied</span>}
+        </div>
+      </div>
+    );
+  }
+
+  const linkedRunbookIdSet = new Set(library.flatMap((s) => s.linkedRunbookIds || []));
+  const orphanRunbooks = runbook.filter((r) => !linkedRunbookIdSet.has(r.id));
+
   return (
     <div className="max-w-3xl mx-auto p-6 text-slate-800">
       <div className="flex justify-between items-start mb-1 gap-4">
         <h1 className="text-xl font-medium">Ticket → SOP Pipeline</h1>
         <button onClick={() => setShowForm((v) => !v)} disabled={busy} className="text-sm font-medium border border-slate-300 rounded-md px-3 py-1.5 hover:bg-slate-50 disabled:opacity-50 whitespace-nowrap">{showForm ? "Close" : "+ Add test ticket"}</button>
       </div>
-      <p className="text-sm text-slate-500 mb-4">A closed Pylon ticket is read by the LLM, checked against the existing SOP library, then it creates a new SOP, merges new detail into an existing one, or skips it as a duplicate. If the ticket was escalated to engineering, its linked Linear ticket is processed the same way into the engineering runbook below.</p>
-      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-5 text-sm text-slate-600">Tickets synced from Pylon (simulated — Workato pulls these in production). Not every ticket has a linked engineering ticket — that's called out explicitly in the activity feed. New SOPs publish to Google Drive, runbook entries publish to Notion (both simulated). Use "Add test ticket" to paste any new issue — try one similar to an existing SOP to see the pipeline merge or skip it.</div>
+      <p className="text-sm text-slate-500 mb-4">A closed Pylon ticket is read by the LLM, checked against the existing SOP library, then it creates a new SOP, merges new detail into an existing one, or skips it as a duplicate. If the ticket was escalated to engineering, its SOP shows a 🔗 linked runbook chip you can expand for the engineering-side fix.</p>
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-5 text-sm text-slate-600">Tickets synced from Pylon (simulated — Workato pulls these in production). Not every ticket has a linked engineering ticket — that's called out explicitly in the activity feed below. New SOPs publish to Google Drive, runbook entries publish to Notion (both simulated). Use "Add test ticket" to paste any new issue — try one similar to an existing SOP to see the pipeline merge or skip it.</div>
 
       {showForm && (
         <div className="bg-white border border-slate-300 rounded-xl p-4 mb-5">
@@ -302,79 +352,57 @@ export default function MiterExercise() {
         })}
       </div>
 
-      <div className="flex items-center gap-1 border-b border-slate-200 mb-4">
-        <button onClick={() => setActiveTab("sop")} className={`text-sm font-medium px-3 py-2 border-b-2 -mb-px ${activeTab === "sop" ? "border-blue-500 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}>SOP library ({library.length})</button>
-        <button onClick={() => setActiveTab("runbook")} className={`text-sm font-medium px-3 py-2 border-b-2 -mb-px ${activeTab === "runbook" ? "border-violet-500 text-violet-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}>Runbook ({runbook.length})</button>
+      <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">SOP library ({library.length})</p>
+      <div className="flex flex-col gap-3">
+        {library.length === 0 && <p className="text-sm text-slate-400">No SOPs yet.</p>}
+        {library.map((s) => (
+          <div key={s.id} className="bg-white border border-slate-200 border-l-4 border-l-blue-500 rounded-xl p-4">
+            <div className="flex justify-between items-start gap-3 mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold tracking-wide text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">SOP</span>
+                <h2 className="text-base font-medium">{s.title}</h2>
+              </div>
+              {s.mergedCount > 1 && <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md whitespace-nowrap">Merged · {s.mergedCount} tickets</span>}
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500 mb-3 bg-slate-50 rounded-md p-2.5">
+              <div><span className="text-slate-400">SOP ID: </span>{s.id}</div>
+              <div><span className="text-slate-400">Owner: </span>{s.owner}</div>
+              <div><span className="text-slate-400">Work area: </span>{s.category}</div>
+              <div><span className="text-slate-400">Source tickets: </span>{s.sourceTickets.map((t) => "#" + t).join(", ")}</div>
+            </div>
+            {(s.linkedRunbookIds || []).length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {s.linkedRunbookIds.map((rid) => (
+                  <button key={rid} onClick={() => toggleLink(rid)} className="text-xs font-mono px-2 py-1 rounded-md border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100">
+                    🔗 {rid} {expandedLinks[rid] ? "▲" : "▼"}
+                  </button>
+                ))}
+              </div>
+            )}
+            {(s.linkedRunbookIds || []).map((rid) => {
+              const r = runbook.find((x) => x.id === rid);
+              return r && expandedLinks[rid] ? renderRunbookDetail(r) : null;
+            })}
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Problem</p>
+            <p className="text-[13px] text-slate-700 mb-3 leading-relaxed">{s.problem}</p>
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Cause</p>
+            <p className="text-[13px] text-slate-700 mb-3 leading-relaxed">{s.cause}</p>
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Resolution steps</p>
+            <ol className="list-decimal list-inside text-[13px] text-slate-700 mb-3 leading-relaxed space-y-0.5">{s.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
+            <div className="flex items-center gap-2">
+              {s.published ? <span className="text-xs text-green-700 bg-green-50 px-2 py-1 rounded-md">Published to Drive</span> : <button onClick={() => publish(s.id)} className="text-sm font-medium bg-slate-800 text-white rounded-md px-3 py-1 hover:bg-slate-700">Publish to Drive</button>}
+              <button onClick={() => copy(s.id, sopToText(s))} className="text-sm font-medium border border-slate-300 rounded-md px-3 py-1 hover:bg-slate-50">Copy</button>
+              {copiedId === s.id && <span className="text-xs text-green-600 ml-1">Copied</span>}
+            </div>
+          </div>
+        ))}
       </div>
 
-      {activeTab === "sop" && (
-        <div className="flex flex-col gap-3">
-          {library.length === 0 && <p className="text-sm text-slate-400">No SOPs yet.</p>}
-          {library.map((s) => (
-            <div key={s.id} className="bg-white border border-slate-200 border-l-4 border-l-blue-500 rounded-xl p-4">
-              <div className="flex justify-between items-start gap-3 mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-semibold tracking-wide text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">SOP</span>
-                  <h2 className="text-base font-medium">{s.title}</h2>
-                </div>
-                {s.mergedCount > 1 && <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md whitespace-nowrap">Merged · {s.mergedCount} tickets</span>}
-              </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500 mb-3 bg-slate-50 rounded-md p-2.5">
-                <div><span className="text-slate-400">SOP ID: </span>{s.id}</div>
-                <div><span className="text-slate-400">Owner: </span>{s.owner}</div>
-                <div><span className="text-slate-400">Work area: </span>{s.category}</div>
-                <div><span className="text-slate-400">Source tickets: </span>{s.sourceTickets.map((t) => "#" + t).join(", ")}</div>
-              </div>
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Problem</p>
-              <p className="text-[13px] text-slate-700 mb-3 leading-relaxed">{s.problem}</p>
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Cause</p>
-              <p className="text-[13px] text-slate-700 mb-3 leading-relaxed">{s.cause}</p>
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Resolution steps</p>
-              <ol className="list-decimal list-inside text-[13px] text-slate-700 mb-3 leading-relaxed space-y-0.5">{s.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
-              <div className="flex items-center gap-2">
-                {s.published ? <span className="text-xs text-green-700 bg-green-50 px-2 py-1 rounded-md">Published to Drive</span> : <button onClick={() => publish(s.id)} className="text-sm font-medium bg-slate-800 text-white rounded-md px-3 py-1 hover:bg-slate-700">Publish to Drive</button>}
-                <button onClick={() => copy(s.id, sopToText(s))} className="text-sm font-medium border border-slate-300 rounded-md px-3 py-1 hover:bg-slate-50">Copy</button>
-                {copiedId === s.id && <span className="text-xs text-green-600 ml-1">Copied</span>}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {activeTab === "runbook" && (
-        <div>
-          <p className="text-sm text-slate-500 mb-4">Created from engineering (Linear) tickets linked to support tickets — only tickets escalated to engineering produce one of these.</p>
-          <div className="flex flex-col gap-3">
-            {runbook.length === 0 && <p className="text-sm text-slate-400">No runbook entries yet.</p>}
-            {runbook.map((r) => (
-              <div key={r.id} className="bg-slate-900 text-slate-100 border border-slate-900 border-l-4 border-l-violet-500 rounded-xl p-4">
-                <div className="flex justify-between items-start gap-3 mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-semibold tracking-wide text-violet-300 bg-violet-950 px-1.5 py-0.5 rounded">RUNBOOK</span>
-                    <h2 className="text-base font-medium font-mono">{r.title}</h2>
-                  </div>
-                  {r.mergedCount > 1 && <span className="text-xs text-amber-300 bg-amber-950 px-2 py-0.5 rounded-md whitespace-nowrap">Merged · {r.mergedCount} issues</span>}
-                </div>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 mb-3 bg-slate-800 rounded-md p-2.5 font-mono">
-                  <div><span className="text-slate-500">Runbook ID: </span>{r.id}</div>
-                  <div><span className="text-slate-500">Team: </span>{r.team}</div>
-                  <div><span className="text-slate-500">Source issues: </span>{r.sourceIssues.join(", ")}</div>
-                  <div><span className="text-slate-500">Source tickets: </span>{[...new Set(r.sourceIssues.map((i) => TICKET_BY_ENG_ISSUE[i]).filter(Boolean))].map((t) => "#" + t).join(", ") || "—"}</div>
-                </div>
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Symptom</p>
-                <p className="text-[13px] text-slate-200 mb-3 leading-relaxed">{r.problem}</p>
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Root cause</p>
-                <p className="text-[13px] text-slate-200 mb-3 leading-relaxed">{r.cause}</p>
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Fix</p>
-                <ol className="list-decimal list-inside text-[13px] text-slate-200 mb-3 leading-relaxed space-y-0.5">{r.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
-                <div className="flex items-center gap-2">
-                  {r.published ? <span className="text-xs text-green-300 bg-green-950 px-2 py-1 rounded-md">Published to Notion</span> : <button onClick={() => publishRunbook(r.id)} className="text-sm font-medium bg-violet-600 text-white rounded-md px-3 py-1 hover:bg-violet-500">Publish to Notion</button>}
-                  <button onClick={() => copyRunbook(r.id, runbookEntryToText(r))} className="text-sm font-medium border border-slate-700 text-slate-200 rounded-md px-3 py-1 hover:bg-slate-800">Copy</button>
-                  {runbookCopiedId === r.id && <span className="text-xs text-green-400 ml-1">Copied</span>}
-                </div>
-              </div>
-            ))}
-          </div>
+      {orphanRunbooks.length > 0 && (
+        <div className="border-t border-slate-200 mt-8 pt-6">
+          <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">Other runbook entries ({orphanRunbooks.length})</p>
+          <p className="text-sm text-slate-500 mb-4">Not yet linked to a visible SOP.</p>
+          <div className="flex flex-col gap-3">{orphanRunbooks.map((r) => renderRunbookDetail(r))}</div>
         </div>
       )}
     </div>
