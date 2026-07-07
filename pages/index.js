@@ -20,16 +20,20 @@ const SEED_TICKETS = [
   { id: 132889, category: "HCM / Reports", title: "Imputed earnings column addition to Job Cost report", body: "Multiple customers have asked for an imputed earnings column to be added to the Job Cost report; it's intentionally not included today.", resolution: "This is a known, intentional product gap, not a bug. Agent explained the limitation and logged it as a recurring product request." },
   { id: 153039, category: "Ecosystem / Sage & Integrations", title: "Job ID not visible on reimbursement charges", body: "When charging reimbursements to a job, the job ID isn't visible — only the job name — which is a problem when many jobs share the same name.", resolution: "Reimbursement line items show job name by default; job ID visibility requires enabling an additional column in the reimbursement view settings. Agent enabled the job ID column and confirmed it resolved the ambiguity." },
   { id: 136085, category: "Ecosystem / Sage & Integrations", title: "Sub jobs not inheriting parent project properties in Sage Intacct sync", body: "After enabling sub jobs, newly synced sub jobs aren't inheriting the parent project's properties as expected.", resolution: "Sub-job property inheritance only applies to jobs created after the parent-child link is established in sync settings; jobs synced before don't retroactively inherit. Agent re-triggered a sync after confirming the parent link, which inherited properties going forward." },
+  { id: 158220, category: "HCM / Reports", title: "Job Cost report unusably slow for large accounts", body: "The Job Cost report takes 10-15+ seconds to load, and sometimes times out completely, for accounts with a large number of active jobs.", resolution: "Confirmed this reproduces consistently on accounts with 500+ active jobs and isn't something the customer can work around from the UI. Escalated to engineering as a performance bug; agent set expectations with the customer and followed up once a fix shipped." },
+  { id: 161045, category: "HCM / Reports", title: "Job Cost report still slow after last performance fix, very large accounts", body: "A customer with 1,000+ active jobs reports the Job Cost report is still taking 15+ seconds to load, even after the recent performance fix.", resolution: "Confirmed the account is well beyond the size the last fix was tested against. Escalated back to engineering as a follow-up performance issue; agent explained the earlier fix landed for typical accounts and this case needed further work." },
 ];
 
 const SEED_ENG_ISSUES = [
-  { id: "ENG-482", team: "Platform Engineering", title: "Job Cost report times out for large multi-job accounts", body: "The Job Cost report endpoint was returning 504s for accounts with 500+ active jobs, blocking report generation entirely.", resolution: "The report query was doing an N+1 lookup per job for labor allocations. Fixed by batching the labor allocation query and adding a covering index on (job_id, pay_period). Added a query timeout with a pagination fallback for very large accounts." },
-  { id: "ENG-507", team: "Integrations Engineering", title: "Sage Intacct sync silently drops sub-job updates", body: "Sub-job property updates weren't propagating to Sage Intacct after the initial sync, with no error surfaced anywhere.", resolution: "The sync worker was catching and swallowing a 422 from Intacct's API when a sub-job's parent link was stale, then marking the sync as successful. Fixed by surfacing sync failures on the customer-facing sync status page and retrying with the refreshed parent link." },
-  { id: "ENG-455", team: "Payroll Engineering", title: "Fringe offset override doesn't survive payroll re-run", body: "When a payroll was recalculated after a correction, job-level fringe offset overrides reset to the deduction-code default, undoing manual overrides.", resolution: "Payroll re-run was reloading deduction rules from the code-level config instead of the job-level override table. Fixed recalculation to read job-level overrides first, falling back to the code-level default only when no override exists." },
-  { id: "ENG-491", team: "Platform Engineering", title: "EEO report generation broke after annual compliance update", body: "After the scheduled annual EEO compliance-spec update shipped, report generation started throwing a schema validation error for a subset of customers.", resolution: "The new spec added a required field that wasn't backfilled for accounts created before a certain date. Fixed by defaulting the field server-side for legacy accounts and backfilling it via migration." },
-  { id: "ENG-512", team: "Infra", title: "Duplicate reimbursement charges under concurrent submission", body: "Customers double-clicking submit on the reimbursement form occasionally created two identical charge records.", resolution: "Submission lacked an idempotency key, so concurrent requests both inserted rows. Fixed by adding a client-generated idempotency key with a unique constraint at the database level." },
-  { id: "ENG-540", team: "Platform Engineering", title: "Job Cost report still slow for 1000+ job accounts after batching fix", body: "Accounts with more than 1000 active jobs still see 15s+ load times on the Job Cost report even after the N+1 fix shipped.", resolution: "Batching fixed the N+1 pattern, but the report still loaded the full job list client-side. Added server-side pagination with a job search/filter so large accounts don't have to load everything at once." },
+  { id: "ENG-455", ticketId: 127493, team: "Payroll Engineering", title: "Fringe offset override doesn't survive payroll re-run", body: "When a payroll was recalculated after a correction, job-level fringe offset overrides reset to the deduction-code default, undoing manual overrides.", resolution: "Payroll re-run was reloading deduction rules from the code-level config instead of the job-level override table. Fixed recalculation to read job-level overrides first, falling back to the code-level default only when no override exists." },
+  { id: "ENG-491", ticketId: 142465, team: "Platform Engineering", title: "EEO report generation broke after annual compliance update", body: "After the scheduled annual EEO compliance-spec update shipped, report generation started throwing a schema validation error for a subset of customers.", resolution: "The new spec added a required field that wasn't backfilled for accounts created before a certain date. Fixed by defaulting the field server-side for legacy accounts and backfilling it via migration." },
+  { id: "ENG-507", ticketId: 136085, team: "Integrations Engineering", title: "Sage Intacct sync silently drops sub-job updates", body: "Sub-job property updates weren't propagating to Sage Intacct after the initial sync, with no error surfaced anywhere.", resolution: "The sync worker was catching and swallowing a 422 from Intacct's API when a sub-job's parent link was stale, then marking the sync as successful. Fixed by surfacing sync failures on the customer-facing sync status page and retrying with the refreshed parent link." },
+  { id: "ENG-482", ticketId: 158220, team: "Platform Engineering", title: "Job Cost report times out for large multi-job accounts", body: "The Job Cost report endpoint was returning 504s for accounts with 500+ active jobs, blocking report generation entirely.", resolution: "The report query was doing an N+1 lookup per job for labor allocations. Fixed by batching the labor allocation query and adding a covering index on (job_id, pay_period). Added a query timeout with a pagination fallback for very large accounts." },
+  { id: "ENG-540", ticketId: 161045, team: "Platform Engineering", title: "Job Cost report still slow for 1000+ job accounts after batching fix", body: "Accounts with more than 1000 active jobs still see 15s+ load times on the Job Cost report even after the N+1 fix shipped.", resolution: "Batching fixed the N+1 pattern, but the report still loaded the full job list client-side. Added server-side pagination with a job search/filter so large accounts don't have to load everything at once." },
 ];
+
+const ENG_ISSUE_BY_TICKET = Object.fromEntries(SEED_ENG_ISSUES.map((i) => [i.ticketId, i]));
+const TICKET_BY_ENG_ISSUE = Object.fromEntries(SEED_ENG_ISSUES.map((i) => [i.id, i.ticketId]));
 
 function buildPrompt(ticket, library) {
   const existing = library.length === 0 ? "none yet" : library.map((s) => `id=${s.id} | Title: ${s.title} | Problem: ${s.problem} | Cause: ${s.cause}`).join("\n");
@@ -148,82 +152,79 @@ export default function MiterExercise() {
   const today = new Date().toISOString().slice(0, 10);
 
   const [runbook, setRunbook] = useState([]);
-  const [runbookLog, setRunbookLog] = useState([]);
   const [runbookCopiedId, setRunbookCopiedId] = useState(null);
   const runbookRef = useRef([]);
-  const runbookStarted = useRef(false);
-  const runbookLogSeq = useRef(0);
 
   const addLog = (e) => { const logId = ++logSeq.current; setLog((p) => [{ ...e, logId }, ...p]); return logId; };
   const setLogRow = (logId, patch) => setLog((p) => p.map((e) => (e.logId === logId ? { ...e, ...patch } : e)));
 
-  async function processTicket(ticket) {
-    const logId = addLog({ ticketId: ticket.id, title: ticket.title, status: "processing" });
+  async function processIssue(issue) {
+    const raw = await callModel(buildRunbookPrompt(issue, runbookRef.current));
+    const d = parse(raw);
+    if (d.decision === "SKIP" && runbookRef.current.some((r) => r.id === d.matchId)) {
+      return { status: "skipped", reason: d.reason, matchId: d.matchId };
+    }
+    if (d.decision === "MERGE") {
+      const idx = runbookRef.current.findIndex((r) => r.id === d.matchId);
+      if (idx >= 0) {
+        const ex = runbookRef.current[idx];
+        const upd = { ...ex, title: d.title || ex.title, problem: d.problem || ex.problem, cause: d.cause || ex.cause, steps: d.steps.length ? d.steps : ex.steps, sourceIssues: [...ex.sourceIssues, issue.id], updated: today, mergedCount: (ex.mergedCount || 1) + 1 };
+        const next = [...runbookRef.current]; next[idx] = upd;
+        runbookRef.current = next; setRunbook(next);
+        return { status: "merged", reason: d.reason, matchId: ex.id };
+      }
+    }
+    const entry = { id: newRunbookId(), title: d.title || issue.title, problem: d.problem, cause: d.cause, steps: d.steps, team: issue.team, sourceIssues: [issue.id], updated: today, mergedCount: 1, published: false };
+    const next = [...runbookRef.current, entry];
+    runbookRef.current = next; setRunbook(next);
+    return { status: "created", reason: d.reason, matchId: entry.id };
+  }
+
+  async function processTicket(ticket, linkedIssue) {
+    const logId = addLog({ ticketId: ticket.id, title: ticket.title, status: "processing", engIssue: linkedIssue ? { id: linkedIssue.id, status: "processing" } : null });
     try {
       const raw = await callModel(buildPrompt(ticket, libRef.current));
       const d = parse(raw);
       if (d.decision === "SKIP" && libRef.current.some((s) => s.id === d.matchId)) {
-        setLogRow(logId, { status: "skipped", reason: d.reason, matchId: d.matchId }); return;
-      }
-      if (d.decision === "MERGE") {
+        setLogRow(logId, { status: "skipped", reason: d.reason, matchId: d.matchId });
+      } else if (d.decision === "MERGE" && libRef.current.some((s) => s.id === d.matchId)) {
         const idx = libRef.current.findIndex((s) => s.id === d.matchId);
-        if (idx >= 0) {
-          const ex = libRef.current[idx];
-          const upd = { ...ex, title: d.title || ex.title, problem: d.problem || ex.problem, cause: d.cause || ex.cause, steps: d.steps.length ? d.steps : ex.steps, sourceTickets: [...ex.sourceTickets, ticket.id], updated: today, mergedCount: (ex.mergedCount || 1) + 1 };
-          const next = [...libRef.current]; next[idx] = upd;
-          libRef.current = next; setLibrary(next);
-          setLogRow(logId, { status: "merged", reason: d.reason, matchId: ex.id }); return;
-        }
+        const ex = libRef.current[idx];
+        const upd = { ...ex, title: d.title || ex.title, problem: d.problem || ex.problem, cause: d.cause || ex.cause, steps: d.steps.length ? d.steps : ex.steps, sourceTickets: [...ex.sourceTickets, ticket.id], updated: today, mergedCount: (ex.mergedCount || 1) + 1 };
+        const next = [...libRef.current]; next[idx] = upd;
+        libRef.current = next; setLibrary(next);
+        setLogRow(logId, { status: "merged", reason: d.reason, matchId: ex.id });
+      } else {
+        const sop = { id: newId(), title: d.title || ticket.title, problem: d.problem, cause: d.cause, steps: d.steps, owner: ownerFor(ticket.category), category: ticket.category, sourceTickets: [ticket.id], updated: today, mergedCount: 1, published: false };
+        const next = [...libRef.current, sop];
+        libRef.current = next; setLibrary(next);
+        setLogRow(logId, { status: "created", reason: d.reason, matchId: sop.id });
       }
-      const sop = { id: newId(), title: d.title || ticket.title, problem: d.problem, cause: d.cause, steps: d.steps, owner: ownerFor(ticket.category), category: ticket.category, sourceTickets: [ticket.id], updated: today, mergedCount: 1, published: false };
-      const next = [...libRef.current, sop];
-      libRef.current = next; setLibrary(next);
-      setLogRow(logId, { status: "created", reason: d.reason, matchId: sop.id });
     } catch (e) {
       setLogRow(logId, { status: "error", reason: (e && e.message) || "error" });
+    }
+
+    if (linkedIssue) {
+      try {
+        const result = await processIssue(linkedIssue);
+        setLogRow(logId, { engIssue: { id: linkedIssue.id, ...result } });
+      } catch (e) {
+        setLogRow(logId, { engIssue: { id: linkedIssue.id, status: "error", reason: (e && e.message) || "error" } });
+      }
     }
   }
 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    (async () => { setBusy(true); for (const t of SEED_TICKETS) { await processTicket(t); await sleep(400); } setBusy(false); })();
-  }, []);
-
-  const addRunbookLog = (e) => { const logId = ++runbookLogSeq.current; setRunbookLog((p) => [{ ...e, logId }, ...p]); return logId; };
-  const setRunbookLogRow = (logId, patch) => setRunbookLog((p) => p.map((e) => (e.logId === logId ? { ...e, ...patch } : e)));
-
-  async function processIssue(issue) {
-    const logId = addRunbookLog({ ticketId: issue.id, title: issue.title, status: "processing" });
-    try {
-      const raw = await callModel(buildRunbookPrompt(issue, runbookRef.current));
-      const d = parse(raw);
-      if (d.decision === "SKIP" && runbookRef.current.some((r) => r.id === d.matchId)) {
-        setRunbookLogRow(logId, { status: "skipped", reason: d.reason, matchId: d.matchId }); return;
+    (async () => {
+      setBusy(true);
+      for (const t of SEED_TICKETS) {
+        await processTicket(t, ENG_ISSUE_BY_TICKET[t.id]);
+        await sleep(400);
       }
-      if (d.decision === "MERGE") {
-        const idx = runbookRef.current.findIndex((r) => r.id === d.matchId);
-        if (idx >= 0) {
-          const ex = runbookRef.current[idx];
-          const upd = { ...ex, title: d.title || ex.title, problem: d.problem || ex.problem, cause: d.cause || ex.cause, steps: d.steps.length ? d.steps : ex.steps, sourceIssues: [...ex.sourceIssues, issue.id], updated: today, mergedCount: (ex.mergedCount || 1) + 1 };
-          const next = [...runbookRef.current]; next[idx] = upd;
-          runbookRef.current = next; setRunbook(next);
-          setRunbookLogRow(logId, { status: "merged", reason: d.reason, matchId: ex.id }); return;
-        }
-      }
-      const entry = { id: newRunbookId(), title: d.title || issue.title, problem: d.problem, cause: d.cause, steps: d.steps, team: issue.team, sourceIssues: [issue.id], updated: today, mergedCount: 1, published: false };
-      const next = [...runbookRef.current, entry];
-      runbookRef.current = next; setRunbook(next);
-      setRunbookLogRow(logId, { status: "created", reason: d.reason, matchId: entry.id });
-    } catch (e) {
-      setRunbookLogRow(logId, { status: "error", reason: (e && e.message) || "error" });
-    }
-  }
-
-  useEffect(() => {
-    if (runbookStarted.current) return;
-    runbookStarted.current = true;
-    (async () => { for (const iss of SEED_ENG_ISSUES) { await processIssue(iss); await sleep(400); } })();
+      setBusy(false);
+    })();
   }, []);
 
   function publishRunbook(id) {
@@ -239,7 +240,7 @@ export default function MiterExercise() {
     const t = { id: Math.floor(100000 + Math.random() * 900000), category: form.category, title: form.title.trim(), body: form.body.trim(), resolution: form.resolution.trim() };
     setForm({ title: "", category: CATEGORIES[0], body: "", resolution: "" });
     setShowForm(false); setBusy(true);
-    await processTicket(t); setBusy(false);
+    await processTicket(t, undefined); setBusy(false);
   }
 
   function publish(id) {
@@ -252,6 +253,7 @@ export default function MiterExercise() {
 
   const stStyle = { processing: "text-slate-500", created: "text-green-700 bg-green-50", merged: "text-amber-700 bg-amber-50", skipped: "text-slate-500 bg-slate-100", error: "text-red-700 bg-red-50" };
   const stLabel = { processing: "Processing…", created: "Created new SOP", merged: "Merged into existing", skipped: "Skipped — duplicate", error: "Error" };
+  const engStLabel = { processing: "Processing…", created: "Created runbook entry", merged: "Merged into existing", skipped: "Skipped — duplicate", error: "Error" };
 
   return (
     <div className="max-w-3xl mx-auto p-6 text-slate-800">
@@ -259,8 +261,8 @@ export default function MiterExercise() {
         <h1 className="text-xl font-medium">Ticket → SOP Pipeline</h1>
         <button onClick={() => setShowForm((v) => !v)} disabled={busy} className="text-sm font-medium border border-slate-300 rounded-md px-3 py-1.5 hover:bg-slate-50 disabled:opacity-50 whitespace-nowrap">{showForm ? "Close" : "+ Add test ticket"}</button>
       </div>
-      <p className="text-sm text-slate-500 mb-4">A closed Pylon ticket is read by the LLM, checked against the existing SOP library, then it creates a new SOP, merges new detail into an existing one, or skips it as a duplicate.</p>
-      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-5 text-sm text-slate-600">Tickets synced from Pylon (simulated — Workato pulls these in production). New SOPs publish to a shared Google Drive folder in production. Use "Add test ticket" to paste any new issue — try one similar to an existing SOP to see the pipeline merge or skip it.</div>
+      <p className="text-sm text-slate-500 mb-4">A closed Pylon ticket is read by the LLM, checked against the existing SOP library, then it creates a new SOP, merges new detail into an existing one, or skips it as a duplicate. If the ticket was escalated to engineering, its linked Linear ticket is processed the same way into the engineering runbook below.</p>
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-5 text-sm text-slate-600">Tickets synced from Pylon (simulated — Workato pulls these in production). Not every ticket has a linked engineering ticket — that's called out explicitly in the activity feed. New SOPs publish to Google Drive, runbook entries publish to Notion (both simulated). Use "Add test ticket" to paste any new issue — try one similar to an existing SOP to see the pipeline merge or skip it.</div>
 
       {showForm && (
         <div className="bg-white border border-slate-300 rounded-xl p-4 mb-5">
@@ -279,18 +281,27 @@ export default function MiterExercise() {
       <div className="flex flex-col gap-1.5 mb-6">
         {log.length === 0 && <p className="text-sm text-slate-400">Processing tickets…</p>}
         {log.map((e) => (
-          <div key={e.logId} className="flex flex-col gap-0.5 text-sm bg-white border border-slate-100 rounded-lg px-3 py-2">
+          <div key={e.logId} className="flex flex-col gap-1 text-sm bg-white border border-slate-100 rounded-lg px-3 py-2">
             <div className="flex items-center justify-between gap-3">
               <span className="text-slate-700 truncate">#{e.ticketId} · {e.title}</span>
               <span className={`text-xs px-2 py-0.5 rounded-md whitespace-nowrap ${stStyle[e.status] || ""}`}>{stLabel[e.status] || e.status}{e.matchId && (e.status === "merged" || e.status === "skipped") ? ` (${e.matchId})` : ""}</span>
             </div>
             {e.status === "error" && e.reason && <span className="text-xs text-red-600">{e.reason}</span>}
+            {e.engIssue ? (
+              <div className="flex items-center justify-between gap-3 pl-3 border-l-2 border-slate-200">
+                <span className="text-xs text-slate-500">↳ Linked engineering ticket {e.engIssue.id}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-md whitespace-nowrap ${stStyle[e.engIssue.status] || ""}`}>{engStLabel[e.engIssue.status] || e.engIssue.status}{e.engIssue.matchId && (e.engIssue.status === "merged" || e.engIssue.status === "skipped") ? ` (${e.engIssue.matchId})` : ""}</span>
+              </div>
+            ) : (
+              <span className="text-xs text-slate-400 pl-3 border-l-2 border-slate-200">↳ No linked engineering ticket</span>
+            )}
+            {e.engIssue && e.engIssue.status === "error" && e.engIssue.reason && <span className="text-xs text-red-600 pl-3">{e.engIssue.reason}</span>}
           </div>
         ))}
       </div>
 
       <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">SOP library ({library.length})</p>
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 mb-8">
         {library.map((s) => (
           <div key={s.id} className="bg-white border border-slate-200 rounded-xl p-4">
             <div className="flex justify-between items-start gap-3 mb-2">
@@ -318,26 +329,9 @@ export default function MiterExercise() {
         ))}
       </div>
 
-      <div className="border-t border-slate-200 mt-8 pt-6">
-        <h1 className="text-xl font-medium mb-1">Engineering Runbook</h1>
-        <p className="text-sm text-slate-500 mb-4">A resolved Linear issue is read by the LLM, checked against the existing runbook, then it creates a new entry, merges new detail into an existing one, or skips it as a duplicate.</p>
-        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-5 text-sm text-slate-600">Issues synced from Linear (simulated). New runbook entries publish to a shared Notion wiki in production.</div>
-
-        <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">Engineering activity</p>
-        <div className="flex flex-col gap-1.5 mb-6">
-          {runbookLog.length === 0 && <p className="text-sm text-slate-400">Processing issues…</p>}
-          {runbookLog.map((e) => (
-            <div key={e.logId} className="flex flex-col gap-0.5 text-sm bg-white border border-slate-100 rounded-lg px-3 py-2">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-slate-700 truncate">{e.ticketId} · {e.title}</span>
-                <span className={`text-xs px-2 py-0.5 rounded-md whitespace-nowrap ${stStyle[e.status] || ""}`}>{stLabel[e.status] || e.status}{e.matchId && (e.status === "merged" || e.status === "skipped") ? ` (${e.matchId})` : ""}</span>
-              </div>
-              {e.status === "error" && e.reason && <span className="text-xs text-red-600">{e.reason}</span>}
-            </div>
-          ))}
-        </div>
-
+      <div className="border-t border-slate-200 pt-6">
         <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">Runbook entries ({runbook.length})</p>
+        <p className="text-sm text-slate-500 mb-4">Created from engineering (Linear) tickets linked to the support tickets above — only tickets that were escalated to engineering produce one of these.</p>
         <div className="flex flex-col gap-3">
           {runbook.map((r) => (
             <div key={r.id} className="bg-white border border-slate-200 rounded-xl p-4">
@@ -349,7 +343,7 @@ export default function MiterExercise() {
                 <div><span className="text-slate-400">Runbook ID: </span>{r.id}</div>
                 <div><span className="text-slate-400">Team: </span>{r.team}</div>
                 <div><span className="text-slate-400">Source issues: </span>{r.sourceIssues.join(", ")}</div>
-                <div><span className="text-slate-400">Last updated: </span>{r.updated}</div>
+                <div><span className="text-slate-400">Source tickets: </span>{[...new Set(r.sourceIssues.map((i) => TICKET_BY_ENG_ISSUE[i]).filter(Boolean))].map((t) => "#" + t).join(", ") || "—"}</div>
               </div>
               <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Problem</p>
               <p className="text-[13px] text-slate-700 mb-3 leading-relaxed">{r.problem}</p>
