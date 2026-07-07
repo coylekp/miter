@@ -36,11 +36,11 @@ const ENG_ISSUE_BY_TICKET = Object.fromEntries(SEED_ENG_ISSUES.map((i) => [i.tic
 const TICKET_BY_ENG_ISSUE = Object.fromEntries(SEED_ENG_ISSUES.map((i) => [i.id, i.ticketId]));
 
 function buildPrompt(ticket, library) {
-  const existing = library.length === 0 ? "none yet" : library.map((s) => `id=${s.id} | Title: ${s.title} | Problem: ${s.problem} | Cause: ${s.cause}`).join("\n");
+  const existing = library.length === 0 ? "none yet" : library.map((s) => `id=${s.id} | Title: ${s.title} | Problem: ${s.problem} | Cause: ${s.cause} | Existing steps: ${s.steps.map((step, i) => `(${i + 1}) ${step}`).join(" ")}`).join("\n");
   return `You maintain a library of reusable support SOPs for Miter (construction SaaS). A resolved support ticket arrived. Decide one of:
 - NEW: no existing SOP covers this issue -> write a new SOP.
-- SKIP: an existing SOP already fully covers it, nothing new to add.
-- MERGE: same underlying issue as an existing SOP, but this ticket adds a useful new cause/edge case/step -> output the updated SOP.
+- SKIP: an existing SOP already fully covers it — same problem, same cause, AND every resolution step in this ticket is already listed in the existing steps (even if worded differently).
+- MERGE: same underlying issue as an existing SOP, but this ticket's resolution contains a cause, edge case, or resolution step that is NOT already present in the existing steps list -> output the updated SOP with that new step added. Compare step-by-step against "Existing steps" above, not just the Problem/Cause summary — a single genuinely new step is enough to make this MERGE, not SKIP.
 
 New ticket:
 Category: ${ticket.category}
@@ -63,11 +63,11 @@ For SKIP, repeat the matched SOP's existing content. For MERGE, output the full 
 }
 
 function buildRunbookPrompt(issue, library) {
-  const existing = library.length === 0 ? "none yet" : library.map((r) => `id=${r.id} | Title: ${r.title} | Problem: ${r.problem} | Cause: ${r.cause}`).join("\n");
+  const existing = library.length === 0 ? "none yet" : library.map((r) => `id=${r.id} | Title: ${r.title} | Problem: ${r.problem} | Cause: ${r.cause} | Existing fix steps: ${r.steps.map((step, i) => `(${i + 1}) ${step}`).join(" ")}`).join("\n");
   return `You maintain an internal engineering runbook of resolved technical issues for Miter (construction SaaS). A resolved Linear issue arrived. Decide one of:
 - NEW: no existing runbook entry covers this issue -> write a new entry.
-- SKIP: an existing entry already fully covers it, nothing new to add.
-- MERGE: same underlying issue as an existing entry, but this issue adds a useful new cause/edge case/step -> output the updated entry.
+- SKIP: an existing entry already fully covers it — same symptom, same root cause, AND every fix step in this issue is already listed in the existing fix steps (even if worded differently).
+- MERGE: same underlying issue as an existing entry, but this issue's resolution contains a root cause detail, edge case, or fix step that is NOT already present in the existing fix steps list -> output the updated entry with that new step added. Compare step-by-step against "Existing fix steps" above, not just the Symptom/RootCause summary — a single genuinely new step is enough to make this MERGE, not SKIP.
 
 New issue:
 Team: ${issue.team}
