@@ -82,9 +82,9 @@ Decision: NEW or SKIP or MERGE
 MatchId: existing entry id or NONE
 Reason: one short sentence
 Title: runbook entry title
-Problem: one line
-Cause: one line
-Steps: step | step | step
+Symptom: what was observed, one line
+RootCause: the underlying technical cause, one line
+Fix: step | step | step
 
 For SKIP, repeat the matched entry's existing content. For MERGE, output the full updated entry.`;
 }
@@ -92,16 +92,16 @@ For SKIP, repeat the matched entry's existing content. For MERGE, output the ful
 function parse(text) {
   const o = { decision: "NEW", matchId: "NONE", reason: "", title: "", problem: "", cause: "", steps: [] };
   for (const line of text.split(/\r?\n/)) {
-    const m = line.match(/^\s*(Decision|MatchId|Reason|Title|Problem|Cause|Steps)\s*:\s*(.*)$/i);
+    const m = line.match(/^\s*(Decision|MatchId|Reason|Title|Problem|Symptom|Cause|RootCause|Root Cause|Steps|Fix)\s*:\s*(.*)$/i);
     if (!m) continue;
-    const k = m[1].toLowerCase(); const v = m[2].trim();
+    const k = m[1].toLowerCase().replace(/\s+/g, ""); const v = m[2].trim();
     if (k === "decision") { const d = v.toUpperCase(); o.decision = d.includes("SKIP") ? "SKIP" : d.includes("MERGE") ? "MERGE" : "NEW"; }
     else if (k === "matchid") o.matchId = v;
     else if (k === "reason") o.reason = v;
     else if (k === "title") o.title = v;
-    else if (k === "problem") o.problem = v;
-    else if (k === "cause") o.cause = v;
-    else if (k === "steps") o.steps = v.split("|").map((s) => s.trim()).filter(Boolean);
+    else if (k === "problem" || k === "symptom") o.problem = v;
+    else if (k === "cause" || k === "rootcause") o.cause = v;
+    else if (k === "steps" || k === "fix") o.steps = v.split("|").map((s) => s.trim()).filter(Boolean);
   }
   return o;
 }
@@ -133,7 +133,7 @@ let counter = 1;
 const newId = () => "SOP-" + String(counter++).padStart(3, "0");
 
 function runbookEntryToText(r) {
-  return [r.title, "", `Team: ${r.team}`, `Source issues: ${r.sourceIssues.join(", ")}`, `Last updated: ${r.updated}`, "", "Problem", r.problem, "", "Cause", r.cause, "", "Resolution steps", ...r.steps.map((x, i) => `${i + 1}. ${x}`)].join("\n");
+  return [r.title, "", `Team: ${r.team}`, `Source issues: ${r.sourceIssues.join(", ")}`, `Last updated: ${r.updated}`, "", "Symptom", r.problem, "", "Root cause", r.cause, "", "Fix", ...r.steps.map((x, i) => `${i + 1}. ${x}`)].join("\n");
 }
 
 let runbookCounter = 1;
@@ -153,6 +153,7 @@ export default function MiterExercise() {
 
   const [runbook, setRunbook] = useState([]);
   const [runbookCopiedId, setRunbookCopiedId] = useState(null);
+  const [activeTab, setActiveTab] = useState("sop");
   const runbookRef = useRef([]);
 
   const addLog = (e) => { const logId = ++logSeq.current; setLog((p) => [{ ...e, logId }, ...p]); return logId; };
@@ -301,72 +302,81 @@ export default function MiterExercise() {
         })}
       </div>
 
-      <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">SOP library ({library.length})</p>
-      <div className="flex flex-col gap-3 mb-8">
-        {library.map((s) => (
-          <div key={s.id} className="bg-white border border-slate-200 border-l-4 border-l-blue-500 rounded-xl p-4">
-            <div className="flex justify-between items-start gap-3 mb-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-semibold tracking-wide text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">SOP</span>
-                <h2 className="text-base font-medium">{s.title}</h2>
-              </div>
-              {s.mergedCount > 1 && <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md whitespace-nowrap">Merged · {s.mergedCount} tickets</span>}
-            </div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500 mb-3 bg-slate-50 rounded-md p-2.5">
-              <div><span className="text-slate-400">SOP ID: </span>{s.id}</div>
-              <div><span className="text-slate-400">Owner: </span>{s.owner}</div>
-              <div><span className="text-slate-400">Work area: </span>{s.category}</div>
-              <div><span className="text-slate-400">Source tickets: </span>{s.sourceTickets.map((t) => "#" + t).join(", ")}</div>
-            </div>
-            <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Problem</p>
-            <p className="text-[13px] text-slate-700 mb-3 leading-relaxed">{s.problem}</p>
-            <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Cause</p>
-            <p className="text-[13px] text-slate-700 mb-3 leading-relaxed">{s.cause}</p>
-            <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Resolution steps</p>
-            <ol className="list-decimal list-inside text-[13px] text-slate-700 mb-3 leading-relaxed space-y-0.5">{s.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
-            <div className="flex items-center gap-2">
-              {s.published ? <span className="text-xs text-green-700 bg-green-50 px-2 py-1 rounded-md">Published to Drive</span> : <button onClick={() => publish(s.id)} className="text-sm font-medium bg-slate-800 text-white rounded-md px-3 py-1 hover:bg-slate-700">Publish to Drive</button>}
-              <button onClick={() => copy(s.id, sopToText(s))} className="text-sm font-medium border border-slate-300 rounded-md px-3 py-1 hover:bg-slate-50">Copy</button>
-              {copiedId === s.id && <span className="text-xs text-green-600 ml-1">Copied</span>}
-            </div>
-          </div>
-        ))}
+      <div className="flex items-center gap-1 border-b border-slate-200 mb-4">
+        <button onClick={() => setActiveTab("sop")} className={`text-sm font-medium px-3 py-2 border-b-2 -mb-px ${activeTab === "sop" ? "border-blue-500 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}>SOP library ({library.length})</button>
+        <button onClick={() => setActiveTab("runbook")} className={`text-sm font-medium px-3 py-2 border-b-2 -mb-px ${activeTab === "runbook" ? "border-violet-500 text-violet-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}>Runbook ({runbook.length})</button>
       </div>
 
-      <div className="border-t border-slate-200 pt-6">
-        <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">Runbook entries ({runbook.length})</p>
-        <p className="text-sm text-slate-500 mb-4">Created from engineering (Linear) tickets linked to the support tickets above — only tickets that were escalated to engineering produce one of these.</p>
+      {activeTab === "sop" && (
         <div className="flex flex-col gap-3">
-          {runbook.map((r) => (
-            <div key={r.id} className="bg-slate-900 text-slate-100 border border-slate-900 border-l-4 border-l-violet-500 rounded-xl p-4">
+          {library.length === 0 && <p className="text-sm text-slate-400">No SOPs yet.</p>}
+          {library.map((s) => (
+            <div key={s.id} className="bg-white border border-slate-200 border-l-4 border-l-blue-500 rounded-xl p-4">
               <div className="flex justify-between items-start gap-3 mb-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-semibold tracking-wide text-violet-300 bg-violet-950 px-1.5 py-0.5 rounded">RUNBOOK</span>
-                  <h2 className="text-base font-medium font-mono">{r.title}</h2>
+                  <span className="text-[10px] font-semibold tracking-wide text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">SOP</span>
+                  <h2 className="text-base font-medium">{s.title}</h2>
                 </div>
-                {r.mergedCount > 1 && <span className="text-xs text-amber-300 bg-amber-950 px-2 py-0.5 rounded-md whitespace-nowrap">Merged · {r.mergedCount} issues</span>}
+                {s.mergedCount > 1 && <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md whitespace-nowrap">Merged · {s.mergedCount} tickets</span>}
               </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 mb-3 bg-slate-800 rounded-md p-2.5 font-mono">
-                <div><span className="text-slate-500">Runbook ID: </span>{r.id}</div>
-                <div><span className="text-slate-500">Team: </span>{r.team}</div>
-                <div><span className="text-slate-500">Source issues: </span>{r.sourceIssues.join(", ")}</div>
-                <div><span className="text-slate-500">Source tickets: </span>{[...new Set(r.sourceIssues.map((i) => TICKET_BY_ENG_ISSUE[i]).filter(Boolean))].map((t) => "#" + t).join(", ") || "—"}</div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500 mb-3 bg-slate-50 rounded-md p-2.5">
+                <div><span className="text-slate-400">SOP ID: </span>{s.id}</div>
+                <div><span className="text-slate-400">Owner: </span>{s.owner}</div>
+                <div><span className="text-slate-400">Work area: </span>{s.category}</div>
+                <div><span className="text-slate-400">Source tickets: </span>{s.sourceTickets.map((t) => "#" + t).join(", ")}</div>
               </div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Problem</p>
-              <p className="text-[13px] text-slate-200 mb-3 leading-relaxed">{r.problem}</p>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Cause</p>
-              <p className="text-[13px] text-slate-200 mb-3 leading-relaxed">{r.cause}</p>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Resolution steps</p>
-              <ol className="list-decimal list-inside text-[13px] text-slate-200 mb-3 leading-relaxed space-y-0.5">{r.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Problem</p>
+              <p className="text-[13px] text-slate-700 mb-3 leading-relaxed">{s.problem}</p>
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Cause</p>
+              <p className="text-[13px] text-slate-700 mb-3 leading-relaxed">{s.cause}</p>
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Resolution steps</p>
+              <ol className="list-decimal list-inside text-[13px] text-slate-700 mb-3 leading-relaxed space-y-0.5">{s.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
               <div className="flex items-center gap-2">
-                {r.published ? <span className="text-xs text-green-300 bg-green-950 px-2 py-1 rounded-md">Published to Notion</span> : <button onClick={() => publishRunbook(r.id)} className="text-sm font-medium bg-violet-600 text-white rounded-md px-3 py-1 hover:bg-violet-500">Publish to Notion</button>}
-                <button onClick={() => copyRunbook(r.id, runbookEntryToText(r))} className="text-sm font-medium border border-slate-700 text-slate-200 rounded-md px-3 py-1 hover:bg-slate-800">Copy</button>
-                {runbookCopiedId === r.id && <span className="text-xs text-green-400 ml-1">Copied</span>}
+                {s.published ? <span className="text-xs text-green-700 bg-green-50 px-2 py-1 rounded-md">Published to Drive</span> : <button onClick={() => publish(s.id)} className="text-sm font-medium bg-slate-800 text-white rounded-md px-3 py-1 hover:bg-slate-700">Publish to Drive</button>}
+                <button onClick={() => copy(s.id, sopToText(s))} className="text-sm font-medium border border-slate-300 rounded-md px-3 py-1 hover:bg-slate-50">Copy</button>
+                {copiedId === s.id && <span className="text-xs text-green-600 ml-1">Copied</span>}
               </div>
             </div>
           ))}
         </div>
-      </div>
+      )}
+
+      {activeTab === "runbook" && (
+        <div>
+          <p className="text-sm text-slate-500 mb-4">Created from engineering (Linear) tickets linked to support tickets — only tickets escalated to engineering produce one of these.</p>
+          <div className="flex flex-col gap-3">
+            {runbook.length === 0 && <p className="text-sm text-slate-400">No runbook entries yet.</p>}
+            {runbook.map((r) => (
+              <div key={r.id} className="bg-slate-900 text-slate-100 border border-slate-900 border-l-4 border-l-violet-500 rounded-xl p-4">
+                <div className="flex justify-between items-start gap-3 mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-semibold tracking-wide text-violet-300 bg-violet-950 px-1.5 py-0.5 rounded">RUNBOOK</span>
+                    <h2 className="text-base font-medium font-mono">{r.title}</h2>
+                  </div>
+                  {r.mergedCount > 1 && <span className="text-xs text-amber-300 bg-amber-950 px-2 py-0.5 rounded-md whitespace-nowrap">Merged · {r.mergedCount} issues</span>}
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 mb-3 bg-slate-800 rounded-md p-2.5 font-mono">
+                  <div><span className="text-slate-500">Runbook ID: </span>{r.id}</div>
+                  <div><span className="text-slate-500">Team: </span>{r.team}</div>
+                  <div><span className="text-slate-500">Source issues: </span>{r.sourceIssues.join(", ")}</div>
+                  <div><span className="text-slate-500">Source tickets: </span>{[...new Set(r.sourceIssues.map((i) => TICKET_BY_ENG_ISSUE[i]).filter(Boolean))].map((t) => "#" + t).join(", ") || "—"}</div>
+                </div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Symptom</p>
+                <p className="text-[13px] text-slate-200 mb-3 leading-relaxed">{r.problem}</p>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Root cause</p>
+                <p className="text-[13px] text-slate-200 mb-3 leading-relaxed">{r.cause}</p>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Fix</p>
+                <ol className="list-decimal list-inside text-[13px] text-slate-200 mb-3 leading-relaxed space-y-0.5">{r.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
+                <div className="flex items-center gap-2">
+                  {r.published ? <span className="text-xs text-green-300 bg-green-950 px-2 py-1 rounded-md">Published to Notion</span> : <button onClick={() => publishRunbook(r.id)} className="text-sm font-medium bg-violet-600 text-white rounded-md px-3 py-1 hover:bg-violet-500">Publish to Notion</button>}
+                  <button onClick={() => copyRunbook(r.id, runbookEntryToText(r))} className="text-sm font-medium border border-slate-700 text-slate-200 rounded-md px-3 py-1 hover:bg-slate-800">Copy</button>
+                  {runbookCopiedId === r.id && <span className="text-xs text-green-400 ml-1">Copied</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
