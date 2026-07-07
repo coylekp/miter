@@ -280,32 +280,36 @@ export default function MiterExercise() {
       <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">Activity</p>
       <div className="flex flex-col gap-1.5 mb-6">
         {log.length === 0 && <p className="text-sm text-slate-400">Processing tickets…</p>}
-        {log.map((e) => (
-          <div key={e.logId} className="flex flex-col gap-1 text-sm bg-white border border-slate-100 rounded-lg px-3 py-2">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-slate-700 truncate">#{e.ticketId} · {e.title}</span>
-              <span className={`text-xs px-2 py-0.5 rounded-md whitespace-nowrap ${stStyle[e.status] || ""}`}>{stLabel[e.status] || e.status}{e.matchId && (e.status === "merged" || e.status === "skipped") ? ` (${e.matchId})` : ""}</span>
-            </div>
-            {e.status === "error" && e.reason && <span className="text-xs text-red-600">{e.reason}</span>}
-            {e.engIssue ? (
-              <div className="flex items-center justify-between gap-3 pl-3 border-l-2 border-slate-200">
-                <span className="text-xs text-slate-500">↳ Linked engineering ticket {e.engIssue.id}</span>
-                <span className={`text-xs px-2 py-0.5 rounded-md whitespace-nowrap ${stStyle[e.engIssue.status] || ""}`}>{engStLabel[e.engIssue.status] || e.engIssue.status}{e.engIssue.matchId && (e.engIssue.status === "merged" || e.engIssue.status === "skipped") ? ` (${e.engIssue.matchId})` : ""}</span>
+        {log.map((e) => {
+          const errText = [e.status === "error" && e.reason, e.engIssue && e.engIssue.status === "error" && e.engIssue.reason].filter(Boolean).join(" · ");
+          return (
+            <div key={e.logId} className="flex flex-col gap-0.5 text-sm bg-white border border-slate-100 rounded-lg px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-700 truncate">#{e.ticketId} · {e.title}</span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className={`text-xs px-2 py-0.5 rounded-md whitespace-nowrap ${stStyle[e.status] || ""}`}>{stLabel[e.status] || e.status}{e.matchId && (e.status === "merged" || e.status === "skipped") ? ` (${e.matchId})` : ""}</span>
+                  {e.engIssue ? (
+                    <span className={`text-xs px-2 py-0.5 rounded-md whitespace-nowrap font-mono ${stStyle[e.engIssue.status] || ""}`} title={`Linked engineering ticket ${e.engIssue.id}`}>{e.engIssue.id} · {engStLabel[e.engIssue.status] || e.engIssue.status}</span>
+                  ) : (
+                    <span className="text-xs px-2 py-0.5 rounded-md whitespace-nowrap text-slate-400 bg-slate-50" title="No linked engineering ticket">no eng ticket</span>
+                  )}
+                </div>
               </div>
-            ) : (
-              <span className="text-xs text-slate-400 pl-3 border-l-2 border-slate-200">↳ No linked engineering ticket</span>
-            )}
-            {e.engIssue && e.engIssue.status === "error" && e.engIssue.reason && <span className="text-xs text-red-600 pl-3">{e.engIssue.reason}</span>}
-          </div>
-        ))}
+              {errText && <span className="text-xs text-red-600">{errText}</span>}
+            </div>
+          );
+        })}
       </div>
 
       <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">SOP library ({library.length})</p>
       <div className="flex flex-col gap-3 mb-8">
         {library.map((s) => (
-          <div key={s.id} className="bg-white border border-slate-200 rounded-xl p-4">
+          <div key={s.id} className="bg-white border border-slate-200 border-l-4 border-l-blue-500 rounded-xl p-4">
             <div className="flex justify-between items-start gap-3 mb-2">
-              <h2 className="text-base font-medium">{s.title}</h2>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold tracking-wide text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">SOP</span>
+                <h2 className="text-base font-medium">{s.title}</h2>
+              </div>
               {s.mergedCount > 1 && <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md whitespace-nowrap">Merged · {s.mergedCount} tickets</span>}
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500 mb-3 bg-slate-50 rounded-md p-2.5">
@@ -334,27 +338,30 @@ export default function MiterExercise() {
         <p className="text-sm text-slate-500 mb-4">Created from engineering (Linear) tickets linked to the support tickets above — only tickets that were escalated to engineering produce one of these.</p>
         <div className="flex flex-col gap-3">
           {runbook.map((r) => (
-            <div key={r.id} className="bg-white border border-slate-200 rounded-xl p-4">
+            <div key={r.id} className="bg-slate-900 text-slate-100 border border-slate-900 border-l-4 border-l-violet-500 rounded-xl p-4">
               <div className="flex justify-between items-start gap-3 mb-2">
-                <h2 className="text-base font-medium">{r.title}</h2>
-                {r.mergedCount > 1 && <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md whitespace-nowrap">Merged · {r.mergedCount} issues</span>}
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-semibold tracking-wide text-violet-300 bg-violet-950 px-1.5 py-0.5 rounded">RUNBOOK</span>
+                  <h2 className="text-base font-medium font-mono">{r.title}</h2>
+                </div>
+                {r.mergedCount > 1 && <span className="text-xs text-amber-300 bg-amber-950 px-2 py-0.5 rounded-md whitespace-nowrap">Merged · {r.mergedCount} issues</span>}
               </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500 mb-3 bg-slate-50 rounded-md p-2.5">
-                <div><span className="text-slate-400">Runbook ID: </span>{r.id}</div>
-                <div><span className="text-slate-400">Team: </span>{r.team}</div>
-                <div><span className="text-slate-400">Source issues: </span>{r.sourceIssues.join(", ")}</div>
-                <div><span className="text-slate-400">Source tickets: </span>{[...new Set(r.sourceIssues.map((i) => TICKET_BY_ENG_ISSUE[i]).filter(Boolean))].map((t) => "#" + t).join(", ") || "—"}</div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 mb-3 bg-slate-800 rounded-md p-2.5 font-mono">
+                <div><span className="text-slate-500">Runbook ID: </span>{r.id}</div>
+                <div><span className="text-slate-500">Team: </span>{r.team}</div>
+                <div><span className="text-slate-500">Source issues: </span>{r.sourceIssues.join(", ")}</div>
+                <div><span className="text-slate-500">Source tickets: </span>{[...new Set(r.sourceIssues.map((i) => TICKET_BY_ENG_ISSUE[i]).filter(Boolean))].map((t) => "#" + t).join(", ") || "—"}</div>
               </div>
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Problem</p>
-              <p className="text-[13px] text-slate-700 mb-3 leading-relaxed">{r.problem}</p>
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Cause</p>
-              <p className="text-[13px] text-slate-700 mb-3 leading-relaxed">{r.cause}</p>
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Resolution steps</p>
-              <ol className="list-decimal list-inside text-[13px] text-slate-700 mb-3 leading-relaxed space-y-0.5">{r.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Problem</p>
+              <p className="text-[13px] text-slate-200 mb-3 leading-relaxed">{r.problem}</p>
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Cause</p>
+              <p className="text-[13px] text-slate-200 mb-3 leading-relaxed">{r.cause}</p>
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Resolution steps</p>
+              <ol className="list-decimal list-inside text-[13px] text-slate-200 mb-3 leading-relaxed space-y-0.5">{r.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
               <div className="flex items-center gap-2">
-                {r.published ? <span className="text-xs text-green-700 bg-green-50 px-2 py-1 rounded-md">Published to Notion</span> : <button onClick={() => publishRunbook(r.id)} className="text-sm font-medium bg-slate-800 text-white rounded-md px-3 py-1 hover:bg-slate-700">Publish to Notion</button>}
-                <button onClick={() => copyRunbook(r.id, runbookEntryToText(r))} className="text-sm font-medium border border-slate-300 rounded-md px-3 py-1 hover:bg-slate-50">Copy</button>
-                {runbookCopiedId === r.id && <span className="text-xs text-green-600 ml-1">Copied</span>}
+                {r.published ? <span className="text-xs text-green-300 bg-green-950 px-2 py-1 rounded-md">Published to Notion</span> : <button onClick={() => publishRunbook(r.id)} className="text-sm font-medium bg-violet-600 text-white rounded-md px-3 py-1 hover:bg-violet-500">Publish to Notion</button>}
+                <button onClick={() => copyRunbook(r.id, runbookEntryToText(r))} className="text-sm font-medium border border-slate-700 text-slate-200 rounded-md px-3 py-1 hover:bg-slate-800">Copy</button>
+                {runbookCopiedId === r.id && <span className="text-xs text-green-400 ml-1">Copied</span>}
               </div>
             </div>
           ))}
