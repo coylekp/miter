@@ -312,8 +312,8 @@ export default function MiterExercise() {
         <h1 className="text-xl font-medium">Ticket → SOP Pipeline</h1>
         <button onClick={() => setShowForm((v) => !v)} disabled={busy} className="text-sm font-medium border border-slate-300 rounded-md px-3 py-1.5 hover:bg-slate-50 disabled:opacity-50 whitespace-nowrap">{showForm ? "Close" : "+ Add test ticket"}</button>
       </div>
-      <p className="text-sm text-slate-500 mb-4">A closed Pylon ticket is read by the LLM, checked against the existing SOP library, then it creates a new SOP, merges new detail into an existing one, or skips it as a duplicate. If the ticket was escalated to engineering, its SOP shows a 🔗 linked runbook chip you can expand for the engineering-side fix.</p>
-      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-5 text-sm text-slate-600">Resolutions are collected in a singular field for efficiency in this prototype. In production, we'd read an entire thread. "Add test ticket" to paste any new issue — try one similar to an existing SOP to see the pipeline merge or skip it.</div>
+      <p className="text-sm text-slate-500 mb-4">A closed Pylon ticket is read by the LLM, checked against the existing SOP library, then it creates a new SOP, merges new detail into an existing one, or skips it as a duplicate. If the ticket was escalated to engineering, its SOP shows a linked runbook chip you can expand for the engineering-side fix.</p>
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-5 text-sm text-slate-600">Resolutions are collected in a singular field for efficiency in this prototype. In production, we'd read an entire thread. "Add test ticket" to paste any new issue. Would recommend testing an exact copy and a slightly modified version to see the pipeline merge or skip it.</div>
 
       {showForm && (
         <div className="bg-white border border-slate-300 rounded-xl p-4 mb-5">
